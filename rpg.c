@@ -14,7 +14,7 @@
 
 
 #define PI 3.141
-//gcc -shared -o pymod6.so -fPIC pymod6.c -O3 -lEGL -lGLESv2 -ldrm -lgbm -lm -I/usr/include/libdrm -I/usr/include/python3.11
+//gcc -shared -o rpg.so -fPIC rpg.c -O3 -lEGL -lGLESv2 -ldrm -lgbm -lm -I/usr/include/libdrm -I/usr/include/python3.11
 
 
 unsigned int
@@ -303,15 +303,15 @@ void createCircle(GLfloat *vertices) {
     vertices[(trisPerCirc-1)*9+5] = vertices[2];
 }
 
-void createVBO(int* VBOlengthPtr) {
+void createVBO(GLconfig* configPtr) {
 
     GLfloat vertices[trisPerCirc*3*3]; //maximum size
     createCircle(vertices);
-    *VBOlengthPtr = trisPerCirc * 3 * 3;
+    configPtr->VBOlength = trisPerCirc * 3 * 3;
 
     glGenBuffers(1, &VBOId);
     glBindBuffer(GL_ARRAY_BUFFER, VBOId);
-    glBufferData(GL_ARRAY_BUFFER, *VBOlengthPtr * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, configPtr->VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
 
     // Specify the layout of the vertex data
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)0);
@@ -340,12 +340,12 @@ void destroyVBO(void) {
     }
 }
 
-void createShaders(const char* fragSource, GLuint* programIDPtr) {
+void createShaders(const char* fragSource, GLconfig* configPtr) {
 
     GLenum errorCheckValue = glGetError();
     GLint compile_ok = GL_FALSE;
 
-    *programIDPtr = glCreateProgram();
+    configPtr->programId = glCreateProgram();
 
     vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShaderId, 1, &vertexShaderSource, NULL);
@@ -371,10 +371,10 @@ void createShaders(const char* fragSource, GLuint* programIDPtr) {
         exit(EXIT_FAILURE);
     }
 
-    glAttachShader(*programIDPtr, vertexShaderId);
-    glAttachShader(*programIDPtr, fragmentShaderId);
-    glLinkProgram(*programIDPtr);
-    glUseProgram(*programIDPtr);
+    glAttachShader(configPtr->programId, vertexShaderId);
+    glAttachShader(configPtr->programId, fragmentShaderId);
+    glLinkProgram(configPtr->programId);
+    glUseProgram(configPtr->programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -534,9 +534,9 @@ GLconfig setup(void) {
 
     checkViewport(&config);
 
-    createShaders(sinFragSource, &(config.programId));
+    createShaders(sinFragSource, &config);
 
-    createVBO(&(config.VBOlength));
+    createVBO(&config);
 
     return config;
 
@@ -622,14 +622,13 @@ static PyMethodDef methods[] = {
 // Module definition structure
 static struct PyModuleDef module = {
     PyModuleDef_HEAD_INIT,
-    "pymod8",   // Module name
+    "rpg",   // Module name
     NULL,         // Module documentation
     -1,           // Size of per-interpreter state of the module
     methods
 };
-
 // Module initialization function
-PyMODINIT_FUNC PyInit_pymod8(void) {
+PyMODINIT_FUNC PyInit_rpg(void) {
     Py_Initialize();
     return PyModule_Create(&module);
 }
