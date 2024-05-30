@@ -23,13 +23,6 @@ unsigned int
 
 float screenRatio = 1.0;
 
-//GL variables
-GLuint
-  vertexShaderId,
-  fragmentShaderId,
-  VAOId,
-  VBOId;
-
 static const EGLint configAttribs[] = {
     EGL_RED_SIZE, 8,
     EGL_GREEN_SIZE, 8,
@@ -49,14 +42,20 @@ typedef struct {
     EGLDisplay display;
     EGLContext context;
     EGLSurface surface;
+
+} GLconfig;
+
+
+typedef struct {
     GLuint vertexShaderId;
     GLuint fragmentShaderId;
     GLuint VAOId;
     GLuint VBOId;
     GLuint programId;
     int VBOlength;
-} GLconfig;
+} shader;
 
+shader myShader;
 
 // The following code related to DRM/GBM was adapted from the following sources:
 // https://github.com/eyelash/tutorials/blob/master/drm-gbm.c
@@ -303,15 +302,15 @@ void createCircle(GLfloat *vertices) {
     vertices[(trisPerCirc-1)*9+5] = vertices[2];
 }
 
-void createVBO(GLconfig* configPtr) {
+void createVBO() {
 
     GLfloat vertices[trisPerCirc*3*3]; //maximum size
     createCircle(vertices);
-    configPtr->VBOlength = trisPerCirc * 3 * 3;
+    myShader.VBOlength = trisPerCirc * 3 * 3;
 
-    glGenBuffers(1, &configPtr->VBOId);
-    glBindBuffer(GL_ARRAY_BUFFER, configPtr->VBOId);
-    glBufferData(GL_ARRAY_BUFFER, configPtr->VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
+    glGenBuffers(1, &myShader.VBOId);
+    glBindBuffer(GL_ARRAY_BUFFER, myShader.VBOId);
+    glBufferData(GL_ARRAY_BUFFER, myShader.VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
 
     // Specify the layout of the vertex data
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)0);
@@ -324,14 +323,14 @@ void createVBO(GLconfig* configPtr) {
      }
 }
 
-void destroyVBO(GLconfig* configPtr) {
+void destroyVBO() {
     GLenum errorCheckValue = glGetError();
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    glDeleteBuffers(1, &configPtr->VBOId);
+    glDeleteBuffers(1, &myShader.VBOId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -340,41 +339,41 @@ void destroyVBO(GLconfig* configPtr) {
     }
 }
 
-void createShaders(const char* fragSource, GLconfig* configPtr) {
+void createShaders(const char* fragSource) {
 
     GLenum errorCheckValue = glGetError();
     GLint compile_ok = GL_FALSE;
 
-    configPtr->programId = glCreateProgram();
+    myShader.programId = glCreateProgram();
 
-    configPtr->vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(configPtr->vertexShaderId, 1, &vertexShaderSource, NULL);
-    glCompileShader(configPtr->vertexShaderId);
+    myShader.vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(myShader.vertexShaderId, 1, &vertexShaderSource, NULL);
+    glCompileShader(myShader.vertexShaderId);
 
-    glGetShaderiv(configPtr->vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(myShader.vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(configPtr->vertexShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(myShader.vertexShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Vertex shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    configPtr->fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(configPtr->fragmentShaderId,1, &fragSource, NULL);
-    glCompileShader(configPtr->fragmentShaderId);
+    myShader.fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(myShader.fragmentShaderId,1, &fragSource, NULL);
+    glCompileShader(myShader.fragmentShaderId);
 
-    glGetShaderiv(configPtr->fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(myShader.fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(configPtr->fragmentShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(myShader.fragmentShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Fragment shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    glAttachShader(configPtr->programId, configPtr->vertexShaderId);
-    glAttachShader(configPtr->programId, configPtr->fragmentShaderId);
-    glLinkProgram(configPtr->programId);
-    glUseProgram(configPtr->programId);
+    glAttachShader(myShader.programId, myShader.vertexShaderId);
+    glAttachShader(myShader.programId, myShader.fragmentShaderId);
+    glLinkProgram(myShader.programId);
+    glUseProgram(myShader.programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -382,17 +381,17 @@ void createShaders(const char* fragSource, GLconfig* configPtr) {
     }
 }
 
-void destroyShaders(GLconfig* configPtr) {
+void destroyShaders() {
     GLenum errorCheckValue = glGetError();
     glUseProgram(0);
 
-    glDetachShader(configPtr->programId, configPtr->vertexShaderId);
-    glDetachShader(configPtr->programId, configPtr->fragmentShaderId);
+    glDetachShader(myShader.programId,myShader.vertexShaderId);
+    glDetachShader(myShader.programId, myShader.fragmentShaderId);
 
-    glDeleteShader(configPtr->fragmentShaderId);
-    glDeleteShader(configPtr->vertexShaderId);
+    glDeleteShader(myShader.fragmentShaderId);
+    glDeleteShader(myShader.vertexShaderId);
 
-    glDeleteProgram(configPtr->programId);
+    glDeleteProgram(myShader.programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -532,12 +531,12 @@ GLconfig setup(void) {
 
     checkViewport(&config);
 
-    createShaders(sinFragSource, &config);
 
-    createVBO(&config);
+    createShaders(sinFragSource);
+
+    createVBO();
 
     return config;
-
 }
 
 void mainloop(GLconfig* configPtr) {
@@ -547,46 +546,19 @@ void mainloop(GLconfig* configPtr) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     long start_time = get_time_micros();
-    int timeLocation = glGetUniformLocation(configPtr->programId, "time");
+    int timeLocation = glGetUniformLocation(myShader.programId, "time");
     for (int q = 0; q < 100; q++) {
         //printf("We got here\n");
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float elapsed_time = (float) (get_time_micros() - start_time)/1000000;
         glUniform1f(timeLocation, elapsed_time);
-        glDrawArrays(GL_TRIANGLES, 0, configPtr->VBOlength);
+        glDrawArrays(GL_TRIANGLES, 0, myShader.VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
     }
     printf("We did 100 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
 }
 
-void* myThreadFunc() {
-    GLenum errorCheckValue;
 
-    GLconfig config = setup();
-
-    mainloop(&config);
-
-    destroyShaders(&config);
-    destroyVBO(&config);
-    EGLcleanup(&config);
-
-    close(config.device);
-    //return EXIT_SUCCESS;
-}
-
-
-// Wrapper function for Python to start the thread
-static PyObject* py_start(PyObject* self, PyObject* args) {
-    pthread_t thread;
-
-    int res = pthread_create(&thread, NULL, myThreadFunc, NULL);
-    if (res != 0) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to start thread");
-        return NULL;
-    }
-    // Return something meaningful if needed
-    Py_RETURN_NONE;
-}
 
 static PyObject* py_setup(PyObject *self, PyObject *args) {
 
@@ -611,7 +583,6 @@ static PyObject* py_display(PyObject* self, PyObject* args) {
 
 // Method definition table
 static PyMethodDef methods[] = {
-    {"start_thread", py_start, METH_NOARGS, "Start a thread that runs forever."},
     {"setup", py_setup, METH_NOARGS, "Config EGL context"},
     {"display", py_display, METH_VARARGS, "Display Something"},
     {NULL, NULL, 0, NULL}  // Sentinel
