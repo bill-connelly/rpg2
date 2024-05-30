@@ -309,8 +309,8 @@ void createVBO(GLconfig* configPtr) {
     createCircle(vertices);
     configPtr->VBOlength = trisPerCirc * 3 * 3;
 
-    glGenBuffers(1, &VBOId);
-    glBindBuffer(GL_ARRAY_BUFFER, VBOId);
+    glGenBuffers(1, &configPtr->VBOId);
+    glBindBuffer(GL_ARRAY_BUFFER, configPtr->VBOId);
     glBufferData(GL_ARRAY_BUFFER, configPtr->VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
 
     // Specify the layout of the vertex data
@@ -324,14 +324,14 @@ void createVBO(GLconfig* configPtr) {
      }
 }
 
-void destroyVBO(void) {
+void destroyVBO(GLconfig* configPtr) {
     GLenum errorCheckValue = glGetError();
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    glDeleteBuffers(1, &VBOId);
+    glDeleteBuffers(1, &configPtr->VBOId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -347,32 +347,32 @@ void createShaders(const char* fragSource, GLconfig* configPtr) {
 
     configPtr->programId = glCreateProgram();
 
-    vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShaderId, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShaderId);
+    configPtr->vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(configPtr->vertexShaderId, 1, &vertexShaderSource, NULL);
+    glCompileShader(configPtr->vertexShaderId);
 
-    glGetShaderiv(vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(configPtr->vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(fragmentShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(configPtr->vertexShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Vertex shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShaderId,1, &fragSource, NULL);
-    glCompileShader(fragmentShaderId);
+    configPtr->fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(configPtr->fragmentShaderId,1, &fragSource, NULL);
+    glCompileShader(configPtr->fragmentShaderId);
 
-    glGetShaderiv(fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(configPtr->fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(fragmentShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(configPtr->fragmentShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Fragment shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    glAttachShader(configPtr->programId, vertexShaderId);
-    glAttachShader(configPtr->programId, fragmentShaderId);
+    glAttachShader(configPtr->programId, configPtr->vertexShaderId);
+    glAttachShader(configPtr->programId, configPtr->fragmentShaderId);
     glLinkProgram(configPtr->programId);
     glUseProgram(configPtr->programId);
 
@@ -382,17 +382,17 @@ void createShaders(const char* fragSource, GLconfig* configPtr) {
     }
 }
 
-void destroyShaders(GLconfig* config) {
+void destroyShaders(GLconfig* configPtr) {
     GLenum errorCheckValue = glGetError();
     glUseProgram(0);
 
-    glDetachShader(config->programId, vertexShaderId);
-    glDetachShader(config->programId, fragmentShaderId);
+    glDetachShader(configPtr->programId, configPtr->vertexShaderId);
+    glDetachShader(configPtr->programId, configPtr->fragmentShaderId);
 
-    glDeleteShader(fragmentShaderId);
-    glDeleteShader(vertexShaderId);
+    glDeleteShader(configPtr->fragmentShaderId);
+    glDeleteShader(configPtr->vertexShaderId);
 
-    glDeleteProgram(config->programId);
+    glDeleteProgram(configPtr->programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -410,25 +410,23 @@ long get_time_micros() {
 int getDeviceDisplay(GLconfig* config) {
     // You can try chaning this to "card0" if "card1" does not work.
     config->device = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
-    if (getDisplay(&(config->display), config->device) != 0)
-    {
+    if (getDisplay(&(config->display), config->device) != 0)  {
         fprintf(stderr, "Unable to get EGL display\n");
         close(config->device);
         return EXIT_FAILURE;
     }
-
     return 1;
 } 
 
-int EGLinit(GLconfig* config) {
+int EGLinit(GLconfig* configPtr) {
     int major, minor;
-    if (eglInitialize(config->display, &major, &minor) && eglBindAPI(EGL_OPENGL_API)) {
+    if (eglInitialize(configPtr->display, &major, &minor) && eglBindAPI(EGL_OPENGL_API)) {
         printf("Initialized EGL version: %d.%d\n", major, minor);
         return 1;
     }
     fprintf(stderr, "Failed to get EGL version! Error: %s\n",  eglGetErrorStr());
-    eglTerminate(config->display);
-    gbmClean(config->device);
+    eglTerminate(configPtr->display);
+    gbmClean(configPtr->device);
     return EXIT_FAILURE;
     
 }
@@ -550,7 +548,7 @@ void mainloop(GLconfig* configPtr) {
 
     long start_time = get_time_micros();
     int timeLocation = glGetUniformLocation(configPtr->programId, "time");
-    for (int q = 0; q < 1000; q++) {
+    for (int q = 0; q < 100; q++) {
         //printf("We got here\n");
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float elapsed_time = (float) (get_time_micros() - start_time)/1000000;
@@ -558,7 +556,7 @@ void mainloop(GLconfig* configPtr) {
         glDrawArrays(GL_TRIANGLES, 0, configPtr->VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
     }
-    printf("We did 1000 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
+    printf("We did 100 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
 }
 
 void* myThreadFunc() {
@@ -569,7 +567,7 @@ void* myThreadFunc() {
     mainloop(&config);
 
     destroyShaders(&config);
-    destroyVBO();
+    destroyVBO(&config);
     EGLcleanup(&config);
 
     close(config.device);
