@@ -370,11 +370,6 @@ void createShaders(const char* fragSource, shader* shaderPtr) {
         exit(EXIT_FAILURE);
     }
 
-    glAttachShader(shaderPtr->programId, shaderPtr->vertexShaderId);
-    glAttachShader(shaderPtr->programId, shaderPtr->fragmentShaderId);
-    glLinkProgram(shaderPtr->programId);
-    glUseProgram(shaderPtr->programId);
-
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
          fprintf(stderr, "ERROR: Could not create the at the end of shaders %s.\n", glGetErrorStr(errorCheckValue));
@@ -395,7 +390,7 @@ void destroyShaders(shader* shaderPtr) {
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
-        fprintf(stderr,  "ERROR: Could not destroy the shaders.\n");
+        fprintf(stderr, "ERROR: Could not destroy %s.\n", glGetErrorStr(errorCheckValue));
         exit(EXIT_FAILURE);
     }
 }
@@ -405,6 +400,17 @@ shader buildShaders(void) {
     createShaders(sinFragSource, &myShader);
     createVBO(&myShader);
     return myShader;
+}
+
+void attachShader(shader* shaderPtr) {
+    glAttachShader(shaderPtr->programId, shaderPtr->vertexShaderId);
+    glAttachShader(shaderPtr->programId, shaderPtr->fragmentShaderId);
+    glLinkProgram(shaderPtr->programId);
+    glUseProgram(shaderPtr->programId);
+    GLenum errorCheckValue = glGetError();
+    if (errorCheckValue != GL_NO_ERROR) {
+        fprintf(stderr, "ERROR: Could not create the at the end of shaders %s.\n", glGetErrorStr(errorCheckValue));
+    }
 }
 
 struct timeval tv;
@@ -580,6 +586,16 @@ static PyObject* py_buildShader(PyObject *self, PyObject *args) {
     return shader_capsule;
 }
 
+static PyObject* py_attachShader(PyObject* self, PyObject* args) {
+    PyObject* shader_capsule;
+     if (!PyArg_ParseTuple(args, "O", &shader_capsule)) {
+        return NULL;
+    }
+    shader* shaderPtr = PyCapsule_GetPointer(shader_capsule, "shader");
+    attachShader(shaderPtr);
+    Py_RETURN_NONE;
+}
+
 static PyObject* py_display(PyObject* self, PyObject* args) {
     PyObject* config_capsule;
     PyObject* shader_capsule;
@@ -596,6 +612,7 @@ static PyObject* py_display(PyObject* self, PyObject* args) {
 static PyMethodDef methods[] = {
     {"setup", py_setup, METH_NOARGS, "Config EGL context"},
     {"build_shader", py_buildShader, METH_NOARGS, "Build Shaders"},
+    {"attach_shader", py_attachShader, METH_VARARGS, "Attach Shader"},
     {"display", py_display, METH_VARARGS, "Display Something"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };
