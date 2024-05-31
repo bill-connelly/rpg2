@@ -55,7 +55,7 @@ typedef struct {
     int VBOlength;
 } shader;
 
-shader myShader;
+
 
 // The following code related to DRM/GBM was adapted from the following sources:
 // https://github.com/eyelash/tutorials/blob/master/drm-gbm.c
@@ -302,15 +302,15 @@ void createCircle(GLfloat *vertices) {
     vertices[(trisPerCirc-1)*9+5] = vertices[2];
 }
 
-void createVBO() {
+void createVBO(shader* shaderPtr) {
 
     GLfloat vertices[trisPerCirc*3*3]; //maximum size
     createCircle(vertices);
-    myShader.VBOlength = trisPerCirc * 3 * 3;
+    shaderPtr->VBOlength = trisPerCirc * 3 * 3;
 
-    glGenBuffers(1, &myShader.VBOId);
-    glBindBuffer(GL_ARRAY_BUFFER, myShader.VBOId);
-    glBufferData(GL_ARRAY_BUFFER, myShader.VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
+    glGenBuffers(1, &(shaderPtr->VBOId));
+    glBindBuffer(GL_ARRAY_BUFFER, shaderPtr->VBOId);
+    glBufferData(GL_ARRAY_BUFFER, shaderPtr->VBOlength * sizeof(GLfloat), vertices, GL_STATIC_DRAW);
 
     // Specify the layout of the vertex data
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)0);
@@ -323,14 +323,14 @@ void createVBO() {
      }
 }
 
-void destroyVBO() {
+void destroyVBO(shader* shaderPtr) {
     GLenum errorCheckValue = glGetError();
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    glDeleteBuffers(1, &myShader.VBOId);
+    glDeleteBuffers(1, &(shaderPtr->VBOId));
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -339,41 +339,41 @@ void destroyVBO() {
     }
 }
 
-void createShaders(const char* fragSource) {
+void createShaders(const char* fragSource, shader* shaderPtr) {
 
     GLenum errorCheckValue = glGetError();
     GLint compile_ok = GL_FALSE;
 
-    myShader.programId = glCreateProgram();
+    shaderPtr->programId = glCreateProgram();
 
-    myShader.vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(myShader.vertexShaderId, 1, &vertexShaderSource, NULL);
-    glCompileShader(myShader.vertexShaderId);
+    shaderPtr->vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(shaderPtr->vertexShaderId, 1, &vertexShaderSource, NULL);
+    glCompileShader(shaderPtr->vertexShaderId);
 
-    glGetShaderiv(myShader.vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(shaderPtr->vertexShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(myShader.vertexShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(shaderPtr->vertexShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Vertex shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    myShader.fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(myShader.fragmentShaderId,1, &fragSource, NULL);
-    glCompileShader(myShader.fragmentShaderId);
+    shaderPtr->fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(shaderPtr->fragmentShaderId,1, &fragSource, NULL);
+    glCompileShader(shaderPtr->fragmentShaderId);
 
-    glGetShaderiv(myShader.fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
+    glGetShaderiv(shaderPtr->fragmentShaderId, GL_COMPILE_STATUS, &compile_ok);
     if(!compile_ok) {
         GLchar infoLog[512];
-        glGetShaderInfoLog(myShader.fragmentShaderId, 512, NULL, infoLog);
+        glGetShaderInfoLog(shaderPtr->fragmentShaderId, 512, NULL, infoLog);
         fprintf(stderr, "Fragment shader compilation failed: %s\n", infoLog);
         exit(EXIT_FAILURE);
     }
 
-    glAttachShader(myShader.programId, myShader.vertexShaderId);
-    glAttachShader(myShader.programId, myShader.fragmentShaderId);
-    glLinkProgram(myShader.programId);
-    glUseProgram(myShader.programId);
+    glAttachShader(shaderPtr->programId, shaderPtr->vertexShaderId);
+    glAttachShader(shaderPtr->programId, shaderPtr->fragmentShaderId);
+    glLinkProgram(shaderPtr->programId);
+    glUseProgram(shaderPtr->programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -381,17 +381,17 @@ void createShaders(const char* fragSource) {
     }
 }
 
-void destroyShaders() {
+void destroyShaders(shader* shaderPtr) {
     GLenum errorCheckValue = glGetError();
     glUseProgram(0);
 
-    glDetachShader(myShader.programId,myShader.vertexShaderId);
-    glDetachShader(myShader.programId, myShader.fragmentShaderId);
+    glDetachShader(shaderPtr->programId, shaderPtr->vertexShaderId);
+    glDetachShader(shaderPtr->programId, shaderPtr->fragmentShaderId);
 
-    glDeleteShader(myShader.fragmentShaderId);
-    glDeleteShader(myShader.vertexShaderId);
+    glDeleteShader(shaderPtr->fragmentShaderId);
+    glDeleteShader(shaderPtr->vertexShaderId);
 
-    glDeleteProgram(myShader.programId);
+    glDeleteProgram(shaderPtr->programId);
 
     errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -400,9 +400,11 @@ void destroyShaders() {
     }
 }
 
-void buildShaders(void) {
-    createShaders(sinFragSource);
-    createVBO();
+shader buildShaders(void) {
+    shader myShader;
+    createShaders(sinFragSource, &myShader);
+    createVBO(&myShader);
+    return myShader;
 }
 
 struct timeval tv;
@@ -539,20 +541,20 @@ GLconfig setup(void) {
     return config;
 }
 
-void mainloop(GLconfig* configPtr) {
+void mainloop(GLconfig* configPtr, shader* shaderPtr) {
 
     // Clear whole screen (front buffer)
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     long start_time = get_time_micros();
-    int timeLocation = glGetUniformLocation(myShader.programId, "time");
+    int timeLocation = glGetUniformLocation(shaderPtr->programId, "time");
     for (int q = 0; q < 100; q++) {
         //printf("We got here\n");
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float elapsed_time = (float) (get_time_micros() - start_time)/1000000;
         glUniform1f(timeLocation, elapsed_time);
-        glDrawArrays(GL_TRIANGLES, 0, myShader.VBOlength);
+        glDrawArrays(GL_TRIANGLES, 0, shaderPtr->VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
     }
     printf("We did 100 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
@@ -571,17 +573,22 @@ static PyObject* py_setup(PyObject *self, PyObject *args) {
 }
 
 static PyObject* py_buildShader(PyObject *self, PyObject *args) {
-    buildShaders();
-    Py_RETURN_NONE;
+    shader* shaderPtr = malloc(sizeof(shader));
+    *shaderPtr = buildShaders();
+    
+    PyObject* shader_capsule = PyCapsule_New(shaderPtr, "shader", NULL);
+    return shader_capsule;
 }
 
 static PyObject* py_display(PyObject* self, PyObject* args) {
     PyObject* config_capsule;
-    if (!PyArg_ParseTuple(args, "O", &config_capsule)) {
+    PyObject* shader_capsule;
+    if (!PyArg_ParseTuple(args, "OO", &config_capsule, &shader_capsule)) {
         return NULL;
     }
     GLconfig* configPtr = PyCapsule_GetPointer(config_capsule,"config");
-    mainloop(configPtr);
+    shader* shaderPtr = PyCapsule_GetPointer(shader_capsule, "shader");
+    mainloop(configPtr, shaderPtr);
     Py_RETURN_NONE;
 }
 
