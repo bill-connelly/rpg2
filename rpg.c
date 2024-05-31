@@ -400,6 +400,11 @@ void destroyShaders() {
     }
 }
 
+void buildShaders(void) {
+    createShaders(sinFragSource);
+    createVBO();
+}
+
 struct timeval tv;
 long get_time_micros() {
     gettimeofday(&tv,NULL);
@@ -531,11 +536,6 @@ GLconfig setup(void) {
 
     checkViewport(&config);
 
-
-    createShaders(sinFragSource);
-
-    createVBO();
-
     return config;
 }
 
@@ -565,11 +565,15 @@ static PyObject* py_setup(PyObject *self, PyObject *args) {
     GLconfig* configPtr = malloc(sizeof(GLconfig));
     *configPtr = setup();
 
-
     PyObject* config_capsule = PyCapsule_New(configPtr, "config", NULL);
     Py_INCREF(config_capsule);
     return config_capsule;
-} 
+}
+
+static PyObject* py_buildShader(PyObject *self, PyObject *args) {
+    buildShaders();
+    Py_RETURN_NONE;
+}
 
 static PyObject* py_display(PyObject* self, PyObject* args) {
     PyObject* config_capsule;
@@ -584,6 +588,7 @@ static PyObject* py_display(PyObject* self, PyObject* args) {
 // Method definition table
 static PyMethodDef methods[] = {
     {"setup", py_setup, METH_NOARGS, "Config EGL context"},
+    {"build_shader", py_buildShader, METH_NOARGS, "Build Shaders"},
     {"display", py_display, METH_VARARGS, "Display Something"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };
