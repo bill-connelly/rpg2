@@ -14,6 +14,8 @@
 
 
 #define PI 3.141
+#define ANGLE_LENGTH 7
+
 //gcc -shared -o rpg.so -fPIC rpg.c -O3 -lEGL -lGLESv2 -ldrm -lgbm -lm -I/usr/include/libdrm -I/usr/include/python3.11
 
 
@@ -187,9 +189,9 @@ char sinFragSourceBuffer[] =
     "varying vec3 fragPos;"
     "float phase = 0.0;"
     "const float f = 20.10;"
-    "const float angle = 0.00000;"
-    "float cosine = 17.3;"
-    "float sine = 10.0;"
+    "const float angle = 1.00000;"
+    "float cosine = cos(angle)*f;"
+    "float sine = sin(angle)*f;"
     "void main() {"
     " phase = time / 0.2;"
     " float m = sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
@@ -395,6 +397,24 @@ void destroyShaders(shader* shaderPtr) {
     }
 }
 
+void updateShaderSource(float gratingAngle) {
+  const char *location = strstr(sinFragSourceBuffer, "angle");
+
+  if (location != NULL) {
+        int index = location - sinFragSourceBuffer;
+        char angle_buffer[ANGLE_LENGTH+1];
+        snprintf(angle_buffer, ANGLE_LENGTH+1, "%f", gratingAngle);
+        for (int i = 0; i < ANGLE_LENGTH; i++) {
+            int offset = 8;
+            sinFragSourceBuffer[index+offset+i] = angle_buffer[i];
+        }
+  } else {
+        printf("Substring not found\n");
+        exit(EXIT_FAILURE);
+  }
+}
+
+
 shader buildShaders(void) {
     shader myShader;
     createShaders(sinFragSource, &myShader);
@@ -526,24 +546,18 @@ int checkViewport(GLconfig* configPtr) {
 GLconfig setup(void) {
     
     GLconfig config;
-
     getDeviceDisplay(&config);
-
     EGLinit(&config);
 
     EGLConfig *configs;
     int configIndex;
     EGLGetConfig(&configs, &configIndex, &config);
-
     EGLGetContext(configs[configIndex], &config);
-
     EGLGetSurface(configs[configIndex], &config);
     free(configs); //configs is malloced in EGLGetConfig()
-
     eglMakeCurrent(config.display, config.surface, config.surface, config.context);
 
     checkViewport(&config);
-
     return config;
 }
 
@@ -578,6 +592,15 @@ static PyObject* py_setup(PyObject *self, PyObject *args) {
     return config_capsule;
 }
 
+static PyObject* py_updateShader(PyObject* self, PyObject* args) {
+    float angle;
+    if (!PyArg_ParseTuple(args, "f", &angle)) {
+         return NULL;
+    }
+    updateShaderSource(angle);
+    Py_RETURN_NONE;
+}
+
 static PyObject* py_buildShader(PyObject *self, PyObject *args) {
     shader* shaderPtr = malloc(sizeof(shader));
     *shaderPtr = buildShaders();
@@ -588,7 +611,7 @@ static PyObject* py_buildShader(PyObject *self, PyObject *args) {
 
 static PyObject* py_attachShader(PyObject* self, PyObject* args) {
     PyObject* shader_capsule;
-     if (!PyArg_ParseTuple(args, "O", &shader_capsule)) {
+    if (!PyArg_ParseTuple(args, "O", &shader_capsule)) {
         return NULL;
     }
     shader* shaderPtr = PyCapsule_GetPointer(shader_capsule, "shader");
@@ -611,6 +634,7 @@ static PyObject* py_display(PyObject* self, PyObject* args) {
 // Method definition table
 static PyMethodDef methods[] = {
     {"setup", py_setup, METH_NOARGS, "Config EGL context"},
+    {"update_shader", py_updateShader, METH_VARARGS, "Update the shader"},
     {"build_shader", py_buildShader, METH_NOARGS, "Build Shaders"},
     {"attach_shader", py_attachShader, METH_VARARGS, "Attach Shader"},
     {"display", py_display, METH_VARARGS, "Display Something"},
