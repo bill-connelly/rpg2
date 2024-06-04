@@ -3,12 +3,12 @@ import time
 
 config = rpg.setup()
 
-shader = rpg.build_shader(3.141/4.0, 20.1)
+shader = rpg.build_shader(0, 20.1, 1)
 rpg.load_shader(config, shader)
 rpg.display(config)
 
 
-shader2 = rpg.build_shader(4.0, 5.01)
+shader2 = rpg.build_shader(0, 5.01, 2)
 rpg.load_shader(config, shader2)
 rpg.display(config)
 

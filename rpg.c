@@ -47,6 +47,7 @@ typedef struct {
     int VBOlength;
     float angle;
     float spatial;
+    float cyclesPerSecond;
     float aspectRatio;
 } shader;
 
@@ -223,13 +224,14 @@ char sinFragSourceBuffer[] =
     "uniform float angle;"
     "uniform float spatial;"
     "uniform float aspectRatio;"
+    "uniform float cyclesPerSecond;"
     "varying vec3 fragPos;"
     "float phase = 0.0;"
 
     "float cosine = cos(angle)*spatial*aspectRatio;"
     "float sine = sin(angle)*spatial;"
     "void main() {"
-    " phase = time / 0.2;"
+    " phase = 2.0 * 3.1415 * time * cyclesPerSecond;"
     " float m = sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
     " gl_FragColor = vec4(m, m, m, 1.0);"
     "}";
@@ -535,7 +537,7 @@ void updateShader(shader* shaderPtr, const char* uniformName, float uniformValue
     glUniform1f(location, uniformValue);
 }
 
-shader buildShaders(float angle, float spatial) {
+shader buildShaders(float angle, float spatial, float cyclesPerSecond) {
     shader myShader;
 
     createShaders(&myShader, sinFragSource);
@@ -545,6 +547,7 @@ shader buildShaders(float angle, float spatial) {
 
     myShader.angle = angle;
     myShader.spatial = spatial;
+    myShader.cyclesPerSecond = cyclesPerSecond;
     myShader.aspectRatio = (float)mode.hdisplay / mode.vdisplay;
 
     glAttachShader(myShader.programId, myShader.vertexShaderId);
@@ -565,6 +568,7 @@ void loadShader(GLconfig* configPtr, shader* shaderPtr) {
     updateShader(shaderPtr, "angle", shaderPtr->angle);
     updateShader(shaderPtr, "spatial", shaderPtr->spatial);
     updateShader(shaderPtr, "aspectRatio", shaderPtr->aspectRatio);
+    updateShader(shaderPtr, "cyclesPerSecond", shaderPtr->cyclesPerSecond);
     printf("Updating shaders took %ld microseconds\n", get_time_micros()-start_time);
 
     GLenum errorCheckValue = glGetError();
@@ -705,7 +709,7 @@ void mainloop(GLconfig* configPtr) {
     long start_time = get_time_micros();
     float elapsed_time;
     int timeLocation = glGetUniformLocation(configPtr->currentShaderPtr->programId, "time");
-    for (int q = 0; q < 200; q++) {
+    for (int q = 0; q < 120; q++) {
         //printf("We got here\n");
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         elapsed_time = (float) (get_time_micros() - start_time)/1000000;
@@ -713,7 +717,7 @@ void mainloop(GLconfig* configPtr) {
         glDrawArrays(GL_TRIANGLES, 0, configPtr->currentShaderPtr->VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
     }
-    printf("We did 200 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
+    printf("We did 120 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
 }
 
 
@@ -732,12 +736,13 @@ static PyObject* py_buildShader(PyObject *self, PyObject *args) {
 
     float angle;
     float spatial;
-    if (!PyArg_ParseTuple(args, "ff", &angle, &spatial)) {
+    float cyclesPerSecond;
+    if (!PyArg_ParseTuple(args, "fff", &angle, &spatial, &cyclesPerSecond)) {
          return NULL;
     }
 
     shader* shaderPtr = malloc(sizeof(shader));
-    *shaderPtr = buildShaders(angle, spatial);
+    *shaderPtr = buildShaders(angle, spatial, cyclesPerSecond);
     
     PyObject* shader_capsule = PyCapsule_New(shaderPtr, "shader", NULL);
     return shader_capsule;
