@@ -14,7 +14,7 @@
 
 
 #define PI 3.141
-#define ANGLE_LENGTH 7
+#define PARAMETER_LENGTH 7
 
 //gcc -shared -o rpg.so -fPIC rpg.c -O3 -lEGL -lGLESv2 -ldrm -lgbm -lm -I/usr/include/libdrm -I/usr/include/python3.11
 
@@ -22,8 +22,6 @@
 unsigned int
   frameCount = 0,
   trisPerCirc = 40;
-
-float screenRatio = 1.0;
 
 static const EGLint configAttribs[] = {
     EGL_RED_SIZE, 8,
@@ -39,14 +37,6 @@ static const EGLint contextAttribs[] = {
     EGL_NONE
 };
 
-typedef struct {
-    int device;
-    EGLDisplay display;
-    EGLContext context;
-    EGLSurface surface;
-
-} GLconfig;
-
 
 typedef struct {
     GLuint vertexShaderId;
@@ -55,9 +45,24 @@ typedef struct {
     GLuint VBOId;
     GLuint programId;
     int VBOlength;
+    float angle;
+    float spatial;
+    float aspectRatio;
 } shader;
 
+typedef struct {
+    int device;
+    EGLDisplay display;
+    EGLContext context;
+    EGLSurface surface;
+    shader* currentShaderPtr;
+} GLconfig;
 
+struct timeval tv;
+long get_time_micros() {
+    gettimeofday(&tv,NULL);
+    return 1000000 * tv.tv_sec + tv.tv_usec;
+}
 
 // The following code related to DRM/GBM was adapted from the following sources:
 // https://github.com/eyelash/tutorials/blob/master/drm-gbm.c
@@ -109,7 +114,18 @@ static int getDisplay(EGLDisplay *display, int device) {
 
     connectorId = connector->connector_id;
     mode = connector->modes[0];
-    printf("resolution: %ix%i\n", mode.hdisplay, mode.vdisplay);
+
+
+    // printf("count modes: %i\n", connector->count_modes);
+    // drmModeModeInfo myMode;
+    // for (int i = 0; i<connector->count_modes; i++) {
+    //     myMode = connector->modes[i];
+    //     printf("resolution: %ix%i\n", myMode.hdisplay, myMode.vdisplay);
+    // } 
+    
+    
+    
+    printf("Resolution: %ix%i\n", mode.hdisplay, mode.vdisplay);
 
     drmModeEncoder *encoder = findEncoder(connector, device);
     if (encoder == NULL) {
@@ -131,14 +147,16 @@ static int getDisplay(EGLDisplay *display, int device) {
 
 static int matchConfigToVisual(EGLDisplay display, EGLint visualId, EGLConfig *configs, int count) {
     EGLint id;
-    for (int i = 0; i < count; ++i)
-    {
-        if (!eglGetConfigAttrib(display, configs[i], EGL_NATIVE_VISUAL_ID, &id))
+    for (int i = 0; i < count; ++i)    {
+        if (!eglGetConfigAttrib(display, configs[i], EGL_NATIVE_VISUAL_ID, &id)) {
             continue;
-        if (id == visualId)
+        }
+        if (id == visualId) {
             return i;
+        }
     }
     return -1;
+
 }
 
 static struct gbm_bo *previousBo = NULL;
@@ -183,23 +201,80 @@ const char* vertexShaderSource =
     "    fragPos = pos;"
     "}";
 
+// char sinFragSourceBuffer[] = 
+//     "uniform vec4 color;"
+//     "uniform float time;"
+//     "uniform float angle;"
+//     "uniform float aspectRatio;"
+//     "varying vec3 fragPos;"
+//     "float phase = 0.00000;"
+//     "const float spatial = 20.1000;"
+//     //"const float angle = 1.07050;" 
+//     "float cosine = cos(angle)*spatial*aspectRatio;"
+//     "float sine = sin(angle)*spatial;"
+//     "void main() {"
+//     " phase = time / 0.2;"
+//     " float m = sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
+//     " gl_FragColor = vec4(m, m, m, 1.0);"
+//     "}";
+
 char sinFragSourceBuffer[] = 
-    "uniform vec4 color;"
     "uniform float time;"
+    "uniform float angle;"
+    "uniform float spatial;"
+    "uniform float aspectRatio;"
     "varying vec3 fragPos;"
     "float phase = 0.0;"
-    "const float f = 20.10;"
-    "const float angle = 1.00000;"
-    "float cosine = cos(angle)*f;"
-    "float sine = sin(angle)*f;"
+
+    "float cosine = cos(angle)*spatial*aspectRatio;"
+    "float sine = sin(angle)*spatial;"
     "void main() {"
     " phase = time / 0.2;"
     " float m = sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
     " gl_FragColor = vec4(m, m, m, 1.0);"
     "}";
 
-
 const char* sinFragSource = sinFragSourceBuffer;
+
+char squareFragSourceBuffer[] = 
+    "uniform vec4 color;"
+    "uniform float time;"
+    "varying vec3 fragPos;"
+    "float phase = 0.00000;"
+    "const float spatial = 20.1000;"
+    "const float angle = 1.57050;" 
+    "float cosine = cos(angle)*spatial;"
+    "float sine = sin(angle)*spatial;"
+    "void main() {"
+    " phase = time / 0.2;"
+    " float m = step(sin(cosine*fragPos.x + sine*fragPos.y + phase), 0.0);"
+    " gl_FragColor = vec4(m, m, m, 1.0);"
+    "}";
+
+const char* squareFragSource = squareFragSourceBuffer;
+
+char gaborFragSourceBuffer[] = 
+    "uniform vec4 color;"
+    "uniform float time;"
+    "varying vec3 fragPos;"
+    "float phase = 0.00000;"
+    "const float spatial = 20.1000;"
+    "const float angle = 1.00000;"
+    "const float sigma = 0.10000;"
+    "const float center_x = 0.00000;"
+    "const float center_y = 0.00000;"
+    "float cosine = cos(angle)*spatial;"
+    "float sine = sin(angle)*spatial;"
+    "float gaussian(float x, float y) {"
+    "  return  exp( -((x-center_x)*(x-center_x) + (y-center_y)*(y-center_y) ) / sigma ) ;"
+    "}"
+    "void main() {"
+    " phase = time / 0.2;"
+    " float m = gaussian(fragPos.x, fragPos.y) * sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
+    " gl_FragColor =  vec4(m, m, m, 1.0);"
+    "}";
+
+const char* gaborFragSource = gaborFragSourceBuffer;
 
 // Get the EGL error back as a string. Useful for debugging.
 static const char *eglGetErrorStr() {
@@ -274,6 +349,7 @@ static const char *glGetErrorStr(GLenum errorCheckValue) {
 }
 
 void createCircle(GLfloat *vertices) {
+    float aspectRatio = (float)mode.hdisplay / mode.vdisplay;
     float cx = 0.0;
     float cy = 0.0;
     float r = 0.5;
@@ -284,14 +360,14 @@ void createCircle(GLfloat *vertices) {
 
     for (int i = 0; i < trisPerCirc; i++) {
         vertices[i*9+0] = x + cx;
-        vertices[i*9+1] = y*screenRatio + cy;
+        vertices[i*9+1] = y*aspectRatio + cy;
         vertices[i*9+2] = 0.0f;
 
         x = (float)r*cosf(delTheta*(i+1));
         y = (float)r*sinf(delTheta*(i+1));
 
         vertices[i*9+3] = x + cx;
-        vertices[i*9+4] = y*screenRatio + cy;
+        vertices[i*9+4] = y*aspectRatio + cy;
         vertices[i*9+5] = 0.0f;
 
         vertices[i*9+6] = cx;
@@ -304,11 +380,42 @@ void createCircle(GLfloat *vertices) {
     vertices[(trisPerCirc-1)*9+5] = vertices[2];
 }
 
+void createRect(GLfloat *vertices) {
+
+    float top = 1.0;
+    float right = 1.0;
+    float left = -1.0;
+    float bottom = -1.0;
+    float rect[] = {left,  top,    0.0,
+                    right, top,    0.0,
+                    left,  bottom, 0.0,
+                    left,  bottom, 0.0,
+                    right, top,    0.0,
+                    right, bottom, 0.0};
+    
+    memcpy(vertices, rect, sizeof(rect));   
+}
+
 void createVBO(shader* shaderPtr) {
 
-    GLfloat vertices[trisPerCirc*3*3]; //maximum size
-    createCircle(vertices);
-    shaderPtr->VBOlength = trisPerCirc * 3 * 3;
+    int shape = 0;
+
+    GLfloat *vertices;
+
+    if (shape) {
+        shaderPtr->VBOlength = trisPerCirc * 3 * 3;
+        vertices = (GLfloat *)malloc(shaderPtr->VBOlength * sizeof(GLfloat));
+        createCircle(vertices);
+    } else {
+        shaderPtr->VBOlength = 2 * 3 * 3;
+        vertices = (GLfloat *)malloc(shaderPtr->VBOlength * sizeof(GLfloat));
+        createRect(vertices);
+    }
+
+    if (vertices == NULL) {
+        fprintf(stderr, "Memory allocation for vertices failed!\n");
+        exit(EXIT_FAILURE);
+    }
 
     glGenBuffers(1, &(shaderPtr->VBOId));
     glBindBuffer(GL_ARRAY_BUFFER, shaderPtr->VBOId);
@@ -318,11 +425,13 @@ void createVBO(shader* shaderPtr) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)0);
     glEnableVertexAttribArray(0);
 
-     GLenum ErrorCheckValue = glGetError();
-     if (ErrorCheckValue != GL_NO_ERROR) {
-         fprintf(stderr, "ERROR: Could not create a VBO\n");
-         exit(EXIT_FAILURE);
-     }
+    free(vertices);
+
+    GLenum ErrorCheckValue = glGetError();
+    if (ErrorCheckValue != GL_NO_ERROR) {
+        fprintf(stderr, "ERROR: Could not create a VBO\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 void destroyVBO(shader* shaderPtr) {
@@ -341,7 +450,7 @@ void destroyVBO(shader* shaderPtr) {
     }
 }
 
-void createShaders(const char* fragSource, shader* shaderPtr) {
+void createShaders(shader* shaderPtr, const char* fragSource) {
 
     GLenum errorCheckValue = glGetError();
     GLint compile_ok = GL_FALSE;
@@ -397,46 +506,72 @@ void destroyShaders(shader* shaderPtr) {
     }
 }
 
-void updateShaderSource(float gratingAngle) {
-  const char *location = strstr(sinFragSourceBuffer, "angle");
+// void updateShaderSource(char* sourceBuffer, const char* parameterName, float parameterValue) {
+//   const char *location = strstr(sourceBuffer, parameterName);
 
-  if (location != NULL) {
-        int index = location - sinFragSourceBuffer;
-        char angle_buffer[ANGLE_LENGTH+1];
-        snprintf(angle_buffer, ANGLE_LENGTH+1, "%f", gratingAngle);
-        for (int i = 0; i < ANGLE_LENGTH; i++) {
-            int offset = 8;
-            sinFragSourceBuffer[index+offset+i] = angle_buffer[i];
-        }
-  } else {
-        printf("Substring not found\n");
+//   if (location != NULL) {
+//         int index = location - sourceBuffer;
+//         char angle_buffer[PARAMETER_LENGTH+1];
+//         snprintf(angle_buffer, PARAMETER_LENGTH+1, "%f", parameterValue);
+//         for (int i = 0; i < PARAMETER_LENGTH; i++) {
+//             uint offset = strlen(parameterName) + 3; //Plus 3 to make room for " = "
+//             sourceBuffer[index+offset+i] = angle_buffer[i];
+//         }
+//   } else {
+//         printf("Substring not found\n");
+//         exit(EXIT_FAILURE);
+//   }
+
+  
+
+// }
+
+void updateShader(shader* shaderPtr, const char* uniformName, float uniformValue) {
+    int location  = glGetUniformLocation(shaderPtr->programId, uniformName);
+    if (location == -1) {
+        printf("Uniform '%s' not found or optimized out.\n", uniformName);
         exit(EXIT_FAILURE);
-  }
+    }
+    glUniform1f(location, uniformValue);
 }
 
-
-shader buildShaders(void) {
+shader buildShaders(float angle, float spatial) {
     shader myShader;
-    createShaders(sinFragSource, &myShader);
+
+    createShaders(&myShader, sinFragSource);
+    //createShaders(gaborFragSource, &myShader);
+    //createShaders(squareFragSource, &myShader);
     createVBO(&myShader);
+
+    myShader.angle = angle;
+    myShader.spatial = spatial;
+    myShader.aspectRatio = (float)mode.hdisplay / mode.vdisplay;
+
+    glAttachShader(myShader.programId, myShader.vertexShaderId);
+    glAttachShader(myShader.programId, myShader.fragmentShaderId);
+    glLinkProgram(myShader.programId);
+    GLenum errorCheckValue = glGetError();
+    if (errorCheckValue != GL_NO_ERROR) {
+        fprintf(stderr, "ERROR: Could not attach shaders %s.\n", glGetErrorStr(errorCheckValue));
+    }
     return myShader;
 }
 
-void attachShader(shader* shaderPtr) {
-    glAttachShader(shaderPtr->programId, shaderPtr->vertexShaderId);
-    glAttachShader(shaderPtr->programId, shaderPtr->fragmentShaderId);
-    glLinkProgram(shaderPtr->programId);
+void loadShader(GLconfig* configPtr, shader* shaderPtr) {
+
     glUseProgram(shaderPtr->programId);
+
+    long start_time = get_time_micros();
+    updateShader(shaderPtr, "angle", shaderPtr->angle);
+    updateShader(shaderPtr, "spatial", shaderPtr->spatial);
+    updateShader(shaderPtr, "aspectRatio", shaderPtr->aspectRatio);
+    printf("Updating shaders took %ld microseconds\n", get_time_micros()-start_time);
+
     GLenum errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
-        fprintf(stderr, "ERROR: Could not create the at the end of shaders %s.\n", glGetErrorStr(errorCheckValue));
+        fprintf(stderr, "ERROR: Could not use shader program %s.\n", glGetErrorStr(errorCheckValue));
     }
-}
-
-struct timeval tv;
-long get_time_micros() {
-    gettimeofday(&tv,NULL);
-    return 1000000 * tv.tv_sec + tv.tv_usec;
+    configPtr->currentShaderPtr = shaderPtr;
 }
 
 int getDeviceDisplay(GLconfig* config) {
@@ -466,7 +601,7 @@ int EGLinit(GLconfig* configPtr) {
 int EGLGetConfig(EGLConfig **configs, int *configIndex, GLconfig* configPtr) {
     EGLint count, numConfigs;
     eglGetConfigs(configPtr->display, NULL, 0, &count);
-    *configs = malloc(count * sizeof(configs));
+    *configs = malloc(count * sizeof(EGLConfig));
     if (!eglChooseConfig(configPtr->display, configAttribs, *configs, count, &numConfigs))  {
         fprintf(stderr, "Failed to get EGL configs! Error: %s\n", eglGetErrorStr());
         eglTerminate(configPtr->display);
@@ -549,35 +684,36 @@ GLconfig setup(void) {
     getDeviceDisplay(&config);
     EGLinit(&config);
 
-    EGLConfig *configs;
+    EGLConfig *EGLconfigs;
     int configIndex;
-    EGLGetConfig(&configs, &configIndex, &config);
-    EGLGetContext(configs[configIndex], &config);
-    EGLGetSurface(configs[configIndex], &config);
-    free(configs); //configs is malloced in EGLGetConfig()
+    EGLGetConfig(&EGLconfigs, &configIndex, &config);
+    EGLGetContext(EGLconfigs[configIndex], &config);
+    EGLGetSurface(EGLconfigs[configIndex], &config);
+    free(EGLconfigs); //configs is malloced in EGLGetConfig()
     eglMakeCurrent(config.display, config.surface, config.surface, config.context);
 
     checkViewport(&config);
     return config;
 }
 
-void mainloop(GLconfig* configPtr, shader* shaderPtr) {
+void mainloop(GLconfig* configPtr) {
 
     // Clear whole screen (front buffer)
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     long start_time = get_time_micros();
-    int timeLocation = glGetUniformLocation(shaderPtr->programId, "time");
-    for (int q = 0; q < 100; q++) {
+    float elapsed_time;
+    int timeLocation = glGetUniformLocation(configPtr->currentShaderPtr->programId, "time");
+    for (int q = 0; q < 200; q++) {
         //printf("We got here\n");
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        float elapsed_time = (float) (get_time_micros() - start_time)/1000000;
+        elapsed_time = (float) (get_time_micros() - start_time)/1000000;
         glUniform1f(timeLocation, elapsed_time);
-        glDrawArrays(GL_TRIANGLES, 0, shaderPtr->VBOlength);
+        glDrawArrays(GL_TRIANGLES, 0, configPtr->currentShaderPtr->VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
     }
-    printf("We did 100 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
+    printf("We did 200 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
 }
 
 
@@ -592,51 +728,49 @@ static PyObject* py_setup(PyObject *self, PyObject *args) {
     return config_capsule;
 }
 
-static PyObject* py_updateShader(PyObject* self, PyObject* args) {
+static PyObject* py_buildShader(PyObject *self, PyObject *args) {
+
     float angle;
-    if (!PyArg_ParseTuple(args, "f", &angle)) {
+    float spatial;
+    if (!PyArg_ParseTuple(args, "ff", &angle, &spatial)) {
          return NULL;
     }
-    updateShaderSource(angle);
-    Py_RETURN_NONE;
-}
 
-static PyObject* py_buildShader(PyObject *self, PyObject *args) {
     shader* shaderPtr = malloc(sizeof(shader));
-    *shaderPtr = buildShaders();
+    *shaderPtr = buildShaders(angle, spatial);
     
     PyObject* shader_capsule = PyCapsule_New(shaderPtr, "shader", NULL);
     return shader_capsule;
 }
 
-static PyObject* py_attachShader(PyObject* self, PyObject* args) {
+static PyObject* py_loadShader(PyObject* self, PyObject* args) {
+    PyObject* config_capsule;
     PyObject* shader_capsule;
-    if (!PyArg_ParseTuple(args, "O", &shader_capsule)) {
+
+    if (!PyArg_ParseTuple(args, "OO", &config_capsule, &shader_capsule)) {
         return NULL;
     }
+    GLconfig* configPtr = PyCapsule_GetPointer(config_capsule, "config");
     shader* shaderPtr = PyCapsule_GetPointer(shader_capsule, "shader");
-    attachShader(shaderPtr);
+    loadShader(configPtr, shaderPtr);
     Py_RETURN_NONE;
 }
 
 static PyObject* py_display(PyObject* self, PyObject* args) {
     PyObject* config_capsule;
-    PyObject* shader_capsule;
-    if (!PyArg_ParseTuple(args, "OO", &config_capsule, &shader_capsule)) {
+    if (!PyArg_ParseTuple(args, "O", &config_capsule)) {
         return NULL;
     }
     GLconfig* configPtr = PyCapsule_GetPointer(config_capsule,"config");
-    shader* shaderPtr = PyCapsule_GetPointer(shader_capsule, "shader");
-    mainloop(configPtr, shaderPtr);
+    mainloop(configPtr);
     Py_RETURN_NONE;
 }
 
 // Method definition table
 static PyMethodDef methods[] = {
     {"setup", py_setup, METH_NOARGS, "Config EGL context"},
-    {"update_shader", py_updateShader, METH_VARARGS, "Update the shader"},
-    {"build_shader", py_buildShader, METH_NOARGS, "Build Shaders"},
-    {"attach_shader", py_attachShader, METH_VARARGS, "Attach Shader"},
+    {"build_shader", py_buildShader, METH_VARARGS, "Build Shaders"}, 
+    {"load_shader", py_loadShader, METH_VARARGS, "Use Shader"},
     {"display", py_display, METH_VARARGS, "Display Something"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };

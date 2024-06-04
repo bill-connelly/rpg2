@@ -1,20 +1,24 @@
 import rpg
+import time
 
 config = rpg.setup()
 
-rpg.update_shader(2.0)
-shader = rpg.build_shader()
-
-rpg.update_shader(4.0)
-shader2 = rpg.build_shader()
+shader = rpg.build_shader(3.141/4.0, 20.1)
+rpg.load_shader(config, shader)
+rpg.display(config)
 
 
+shader2 = rpg.build_shader(4.0, 5.01)
+rpg.load_shader(config, shader2)
+rpg.display(config)
 
-rpg.attach_shader(shader)
-rpg.display(config, shader)
 
-rpg.attach_shader(shader2)
-rpg.display(config, shader2)
+
+#rpg.update_shader(shader2, 3.141/4.0)
+
+
+#rpg.attach_shader(shader2)
+#rpg.display(config, shader2)
 
 
 #rpg.display(config)
