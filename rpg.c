@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <math.h>
-
+#include <wiringPi.h>
 
 #define PI 3.141
 #define PARAMETER_LENGTH 7
@@ -33,8 +33,8 @@ static const EGLint configAttribs[] = {
 };
 
 static const EGLint contextAttribs[] = {
-    EGL_CONTEXT_CLIENT_VERSION, 2,
-    EGL_NONE
+     EGL_CONTEXT_CLIENT_VERSION, 2,
+     EGL_NONE
 };
 
 
@@ -59,6 +59,18 @@ typedef struct {
     shader* currentShaderPtr;
 } GLconfig;
 
+typedef struct {
+    drmModeModeInfo mode;
+    struct gbm_device *gbmDevice;
+    struct gbm_surface *gbmSurface;
+    drmModeCrtc *crtc;
+    uint32_t connectorId;
+    struct gbm_bo *previousBo; //needs to be null
+    uint32_t previousFb;
+} drmConfig;
+
+drmConfig drm;
+
 struct timeval tv;
 long get_time_micros() {
     gettimeofday(&tv,NULL);
@@ -72,15 +84,10 @@ long get_time_micros() {
 //
 // I am not the original author of this code, I have only modified it.
 
-drmModeModeInfo mode;
-struct gbm_device *gbmDevice;
-struct gbm_surface *gbmSurface;
-drmModeCrtc *crtc;
-uint32_t connectorId;
+
 
 static drmModeConnector *getConnector(drmModeRes *resources, int device) {
-    for (int i = 0; i < resources->count_connectors; i++)
-    {
+    for (int i = 0; i < resources->count_connectors; i++)  {
         drmModeConnector *connector = drmModeGetConnector(device, resources->connectors[i]);
         if (connector->connection == DRM_MODE_CONNECTED)
         {
@@ -113,20 +120,12 @@ static int getDisplay(EGLDisplay *display, int device) {
         return -1;
     }
 
-    connectorId = connector->connector_id;
-    mode = connector->modes[0];
+    drm.connectorId = connector->connector_id;
+    drm.mode = connector->modes[0];
 
-
-    // printf("count modes: %i\n", connector->count_modes);
-    // drmModeModeInfo myMode;
-    // for (int i = 0; i<connector->count_modes; i++) {
-    //     myMode = connector->modes[i];
-    //     printf("resolution: %ix%i\n", myMode.hdisplay, myMode.vdisplay);
-    // } 
     
     
-    
-    printf("Resolution: %ix%i\n", mode.hdisplay, mode.vdisplay);
+    printf("Resolution: %ix%i\n", drm.mode.hdisplay, drm.mode.vdisplay);
 
     drmModeEncoder *encoder = findEncoder(connector, device);
     if (encoder == NULL) {
@@ -136,13 +135,13 @@ static int getDisplay(EGLDisplay *display, int device) {
         return -1;
     }
 
-    crtc = drmModeGetCrtc(device, encoder->crtc_id);
+    drm.crtc = drmModeGetCrtc(device, encoder->crtc_id);
     drmModeFreeEncoder(encoder);
     drmModeFreeConnector(connector);
     drmModeFreeResources(resources);
-    gbmDevice = gbm_create_device(device);
-    gbmSurface = gbm_surface_create(gbmDevice, mode.hdisplay, mode.vdisplay, GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-    *display = eglGetDisplay(gbmDevice);
+    drm.gbmDevice = gbm_create_device(device);
+    drm.gbmSurface = gbm_surface_create(drm.gbmDevice, drm.mode.hdisplay, drm.mode.vdisplay, GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+    *display = eglGetDisplay(drm.gbmDevice);
     return 0;
 }
 
@@ -160,38 +159,44 @@ static int matchConfigToVisual(EGLDisplay display, EGLint visualId, EGLConfig *c
 
 }
 
-static struct gbm_bo *previousBo = NULL;
-static uint32_t previousFb;
+
 
 static void gbmSwapBuffers(EGLDisplay *display, EGLSurface *surface, int device) {
     eglSwapBuffers(*display, *surface);
-    struct gbm_bo *bo = gbm_surface_lock_front_buffer(gbmSurface);
+
+    struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm.gbmSurface);
+    if (bo == NULL) {
+        fprintf(stderr, "Failed to lock front buffer\n");
+    }
     uint32_t handle = gbm_bo_get_handle(bo).u32;
     uint32_t pitch = gbm_bo_get_stride(bo);
     uint32_t fb;
-    drmModeAddFB(device, mode.hdisplay, mode.vdisplay, 24, 32, pitch, handle, &fb);
-    drmModeSetCrtc(device, crtc->crtc_id, fb, 0, 0, &connectorId, 1, &mode);
 
-    if (previousBo) {
-        drmModeRmFB(device, previousFb);
-        gbm_surface_release_buffer(gbmSurface, previousBo);
+    drmModeAddFB(device, drm.mode.hdisplay, drm.mode.vdisplay, 24, 32, pitch, handle, &fb);
+
+    drmModeSetCrtc(device, drm.crtc->crtc_id, fb, 0, 0, &(drm.connectorId), 1, &(drm.mode)); //vsynching occurs in here, somehow.
+
+    if (drm.previousBo) {
+        drmModeRmFB(device, drm.previousFb);
+        gbm_surface_release_buffer(drm.gbmSurface, drm.previousBo);
     }
-    previousBo = bo;
-    previousFb = fb;
+
+    drm.previousBo = bo;
+    drm.previousFb = fb;
 }
 
 static void gbmClean(int device) {
     // set the previous crtc
-    drmModeSetCrtc(device, crtc->crtc_id, crtc->buffer_id, crtc->x, crtc->y, &connectorId, 1, &crtc->mode);
-    drmModeFreeCrtc(crtc);
+    drmModeSetCrtc(device, drm.crtc->crtc_id, drm.crtc->buffer_id, drm.crtc->x, drm.crtc->y, &drm.connectorId, 1, &drm.crtc->mode);
+    drmModeFreeCrtc(drm.crtc);
 
-    if (previousBo) {
-        drmModeRmFB(device, previousFb);
-        gbm_surface_release_buffer(gbmSurface, previousBo);
+    if (drm.previousBo) {
+        drmModeRmFB(device, drm.previousFb);
+        gbm_surface_release_buffer(drm.gbmSurface, drm.previousBo);
     }
 
-    gbm_surface_destroy(gbmSurface);
-    gbm_device_destroy(gbmDevice);
+    gbm_surface_destroy(drm.gbmSurface);
+    gbm_device_destroy(drm.gbmDevice);
 }
 
 const char* vertexShaderSource =
@@ -201,23 +206,6 @@ const char* vertexShaderSource =
     "    gl_Position = vec4(pos, 1.0);"
     "    fragPos = pos;"
     "}";
-
-// char sinFragSourceBuffer[] = 
-//     "uniform vec4 color;"
-//     "uniform float time;"
-//     "uniform float angle;"
-//     "uniform float aspectRatio;"
-//     "varying vec3 fragPos;"
-//     "float phase = 0.00000;"
-//     "const float spatial = 20.1000;"
-//     //"const float angle = 1.07050;" 
-//     "float cosine = cos(angle)*spatial*aspectRatio;"
-//     "float sine = sin(angle)*spatial;"
-//     "void main() {"
-//     " phase = time / 0.2;"
-//     " float m = sin(cosine*fragPos.x + sine*fragPos.y + phase) * 0.5 + 0.5;"
-//     " gl_FragColor = vec4(m, m, m, 1.0);"
-//     "}";
 
 char sinFragSourceBuffer[] = 
     "uniform float time;"
@@ -351,7 +339,7 @@ static const char *glGetErrorStr(GLenum errorCheckValue) {
 }
 
 void createCircle(GLfloat *vertices) {
-    float aspectRatio = (float)mode.hdisplay / mode.vdisplay;
+    float aspectRatio = (float)drm.mode.hdisplay / drm.mode.vdisplay;
     float cx = 0.0;
     float cy = 0.0;
     float r = 0.5;
@@ -508,25 +496,6 @@ void destroyShaders(shader* shaderPtr) {
     }
 }
 
-// void updateShaderSource(char* sourceBuffer, const char* parameterName, float parameterValue) {
-//   const char *location = strstr(sourceBuffer, parameterName);
-
-//   if (location != NULL) {
-//         int index = location - sourceBuffer;
-//         char angle_buffer[PARAMETER_LENGTH+1];
-//         snprintf(angle_buffer, PARAMETER_LENGTH+1, "%f", parameterValue);
-//         for (int i = 0; i < PARAMETER_LENGTH; i++) {
-//             uint offset = strlen(parameterName) + 3; //Plus 3 to make room for " = "
-//             sourceBuffer[index+offset+i] = angle_buffer[i];
-//         }
-//   } else {
-//         printf("Substring not found\n");
-//         exit(EXIT_FAILURE);
-//   }
-
-  
-
-// }
 
 void updateShader(shader* shaderPtr, const char* uniformName, float uniformValue) {
     int location  = glGetUniformLocation(shaderPtr->programId, uniformName);
@@ -548,7 +517,7 @@ shader buildShaders(float angle, float spatial, float cyclesPerSecond) {
     myShader.angle = angle;
     myShader.spatial = spatial;
     myShader.cyclesPerSecond = cyclesPerSecond;
-    myShader.aspectRatio = (float)mode.hdisplay / mode.vdisplay;
+    myShader.aspectRatio = (float)drm.mode.hdisplay / drm.mode.vdisplay;
 
     glAttachShader(myShader.programId, myShader.vertexShaderId);
     glAttachShader(myShader.programId, myShader.fragmentShaderId);
@@ -564,12 +533,10 @@ void loadShader(GLconfig* configPtr, shader* shaderPtr) {
 
     glUseProgram(shaderPtr->programId);
 
-    long start_time = get_time_micros();
     updateShader(shaderPtr, "angle", shaderPtr->angle);
     updateShader(shaderPtr, "spatial", shaderPtr->spatial);
     updateShader(shaderPtr, "aspectRatio", shaderPtr->aspectRatio);
     updateShader(shaderPtr, "cyclesPerSecond", shaderPtr->cyclesPerSecond);
-    printf("Updating shaders took %ld microseconds\n", get_time_micros()-start_time);
 
     GLenum errorCheckValue = glGetError();
     if (errorCheckValue != GL_NO_ERROR) {
@@ -578,12 +545,12 @@ void loadShader(GLconfig* configPtr, shader* shaderPtr) {
     configPtr->currentShaderPtr = shaderPtr;
 }
 
-int getDeviceDisplay(GLconfig* config) {
+int getDeviceDisplay(GLconfig* configPtr) {
     // You can try chaning this to "card0" if "card1" does not work.
-    config->device = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
-    if (getDisplay(&(config->display), config->device) != 0)  {
+    configPtr->device = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
+    if (getDisplay(&(configPtr->display), configPtr->device) != 0)  {
         fprintf(stderr, "Unable to get EGL display\n");
-        close(config->device);
+        close(configPtr->device);
         return EXIT_FAILURE;
     }
     return 1;
@@ -592,9 +559,10 @@ int getDeviceDisplay(GLconfig* config) {
 int EGLinit(GLconfig* configPtr) {
     int major, minor;
     if (eglInitialize(configPtr->display, &major, &minor) && eglBindAPI(EGL_OPENGL_API)) {
-        printf("Initialized EGL version: %d.%d\n", major, minor);
+        printf("Initialized EGL version: %d.%d\n", major, minor);            
         return 1;
     }
+
     fprintf(stderr, "Failed to get EGL version! Error: %s\n",  eglGetErrorStr());
     eglTerminate(configPtr->display);
     gbmClean(configPtr->device);
@@ -619,8 +587,8 @@ int EGLGetConfig(EGLConfig **configs, int *configIndex, GLconfig* configPtr) {
     if (configIndex < 0)  {
         fprintf(stderr, "Failed to find matching EGL config! Error: %s\n",  eglGetErrorStr());
         eglTerminate(configPtr->display);
-        gbm_surface_destroy(gbmSurface);
-        gbm_device_destroy(gbmDevice);
+        gbm_surface_destroy(drm.gbmSurface);
+        gbm_device_destroy(drm.gbmDevice);
         free(configs);
         return EXIT_FAILURE;
     }
@@ -641,7 +609,7 @@ int EGLGetContext(EGLConfig config, GLconfig* configPtr) {
 }
 
 int EGLGetSurface(EGLConfig config, GLconfig* configPtr) {
-    configPtr->surface = eglCreateWindowSurface(configPtr->display, config, gbmSurface, NULL);
+    configPtr->surface = eglCreateWindowSurface(configPtr->display, config, drm.gbmSurface, NULL);
     if (configPtr->surface == EGL_NO_SURFACE)  {
         fprintf(stderr, "Failed to create EGL surface! Error: %s\n",  eglGetErrorStr());
         eglDestroyContext(configPtr->display, configPtr->context);
@@ -661,8 +629,8 @@ void EGLcleanup(GLconfig* configPtr) {
 }
 
 int checkViewport(GLconfig* configPtr) {
-    int desiredWidth = mode.hdisplay;
-    int desiredHeight = mode.vdisplay;
+    int desiredWidth = drm.mode.hdisplay;
+    int desiredHeight = drm.mode.vdisplay;
 
     // Set GL Viewport size, always needed!
     glViewport(0, 0, desiredWidth, desiredHeight);
@@ -684,6 +652,12 @@ int checkViewport(GLconfig* configPtr) {
 
 GLconfig setup(void) {
     
+
+    wiringPiSetupGpio();
+    pinMode(25, INPUT);
+
+    drm.previousBo=NULL;
+
     GLconfig config;
     getDeviceDisplay(&config);
     EGLinit(&config);
@@ -696,30 +670,109 @@ GLconfig setup(void) {
     free(EGLconfigs); //configs is malloced in EGLGetConfig()
     eglMakeCurrent(config.display, config.surface, config.surface, config.context);
 
+    const char* version = (const char*)glGetString(GL_VERSION);
+    printf("OpenGL Version: %s\n", version);
+    const char* glslVersion = (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    printf("GLSL Version: %s\n", glslVersion);
+
+
     checkViewport(&config);
     return config;
 }
 
-void mainloop(GLconfig* configPtr) {
-
+void mainloop(GLconfig* configPtr, int triggerPin) {
     // Clear whole screen (front buffer)
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    long start_time = get_time_micros();
     float elapsed_time;
     int timeLocation = glGetUniformLocation(configPtr->currentShaderPtr->programId, "time");
-    for (int q = 0; q < 120; q++) {
-        //printf("We got here\n");
+
+    if (triggerPin) {
+        while(!digitalRead(triggerPin)) {
+            continue;
+        }
+    }
+
+    long start_time = get_time_micros();
+
+    for (int q = 0; q < 400; q++) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
         elapsed_time = (float) (get_time_micros() - start_time)/1000000;
         glUniform1f(timeLocation, elapsed_time);
         glDrawArrays(GL_TRIANGLES, 0, configPtr->currentShaderPtr->VBOlength);
         gbmSwapBuffers(&(configPtr->display), &(configPtr->surface), configPtr->device);
+
+        //int value = digitalRead(25);
     }
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     printf("We did 120 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
 }
 
+pthread_cond_t displayStartCond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t setupStartCond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
+GLconfig* globalConfigPtr;
+shader* globalShaderPtr;
+float ang;
+void thread_mainloop() {
+    ang = 0.0;
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    float elapsed_time;
+    pthread_mutex_lock(&globalLock);
+    int timeLocation = glGetUniformLocation(globalConfigPtr->currentShaderPtr->programId, "time");
+    int angleLocation = glGetUniformLocation(globalConfigPtr->currentShaderPtr->programId, "angle");
+    pthread_mutex_unlock(&globalLock);
+
+    long start_time = get_time_micros();
+
+    for (int q = 0; q < 1000; q++) {
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        elapsed_time = (float) (get_time_micros() - start_time)/1000000;
+        glUniform1f(timeLocation, elapsed_time);
+        pthread_mutex_lock(&globalLock);
+        glUniform1f(angleLocation, ang);
+        glDrawArrays(GL_TRIANGLES, 0, globalConfigPtr->currentShaderPtr->VBOlength);
+        gbmSwapBuffers(&(globalConfigPtr->display), &(globalConfigPtr->surface), globalConfigPtr->device);
+        pthread_mutex_unlock(&globalLock);
+    }
+    printf("We did 240 frames in %f\n", (double)(get_time_micros() - start_time)/1000000);
+}
+
+
+void* threadSetup(void* arg) {
+    globalConfigPtr = malloc(sizeof(GLconfig));
+    *globalConfigPtr = setup();
+
+    globalShaderPtr= malloc(sizeof(shader));
+    *globalShaderPtr = buildShaders(0.0, 20.0, 3.5);
+
+    loadShader(globalConfigPtr, globalShaderPtr);
+
+    //setup done signal to main thread.
+    pthread_mutex_lock(&globalLock);
+    pthread_cond_signal(&setupStartCond);
+    pthread_mutex_unlock(&globalLock);
+
+    //wait until display is ready.
+    pthread_cond_wait(&displayStartCond, &globalLock);
+    pthread_mutex_unlock(&globalLock);
+    thread_mainloop();
+
+    return NULL;
+
+}
+
+void thread_update(float angle) {
+    pthread_mutex_lock(&globalLock);
+    ang = angle;
+    pthread_mutex_unlock(&globalLock);
+}
 
 
 static PyObject* py_setup(PyObject *self, PyObject *args) {
@@ -745,6 +798,7 @@ static PyObject* py_buildShader(PyObject *self, PyObject *args) {
     *shaderPtr = buildShaders(angle, spatial, cyclesPerSecond);
     
     PyObject* shader_capsule = PyCapsule_New(shaderPtr, "shader", NULL);
+    Py_INCREF(shader_capsule);
     return shader_capsule;
 }
 
@@ -763,11 +817,40 @@ static PyObject* py_loadShader(PyObject* self, PyObject* args) {
 
 static PyObject* py_display(PyObject* self, PyObject* args) {
     PyObject* config_capsule;
-    if (!PyArg_ParseTuple(args, "O", &config_capsule)) {
+    int triggerPin;
+    if (!PyArg_ParseTuple(args, "Oi", &config_capsule, &triggerPin)) {
         return NULL;
     }
     GLconfig* configPtr = PyCapsule_GetPointer(config_capsule,"config");
-    mainloop(configPtr);
+    mainloop(configPtr, triggerPin);
+    Py_RETURN_NONE;
+}
+
+
+static PyObject* py_threadSetup(PyObject* self, PyObject* args) {
+    pthread_t thread;
+    if(pthread_create(&thread, NULL, threadSetup, NULL) != 0) {
+        return NULL;
+    };
+    pthread_mutex_lock(&globalLock);
+    pthread_cond_wait(&setupStartCond, &globalLock);
+    pthread_mutex_unlock(&globalLock);
+    Py_RETURN_NONE;
+}
+
+static PyObject* py_threadDisplay(PyObject* self, PyObject* args) {
+    pthread_mutex_lock(&globalLock);
+    pthread_cond_signal(&displayStartCond);
+    pthread_mutex_unlock(&globalLock);
+    Py_RETURN_NONE;    
+}
+
+static PyObject* py_threadUpdate(PyObject* self, PyObject* args) {
+    float angle;
+    if (!PyArg_ParseTuple(args, "f", &angle)) {
+        return NULL;
+    }
+    thread_update(angle);
     Py_RETURN_NONE;
 }
 
@@ -777,6 +860,9 @@ static PyMethodDef methods[] = {
     {"build_shader", py_buildShader, METH_VARARGS, "Build Shaders"}, 
     {"load_shader", py_loadShader, METH_VARARGS, "Use Shader"},
     {"display", py_display, METH_VARARGS, "Display Something"},
+    {"thread_setup", py_threadSetup, METH_NOARGS, "Setup the global shader on a separate display"},
+    {"thread_display", py_threadDisplay, METH_NOARGS, "Start the thread displaying the global shader"},
+    {"thread_update", py_threadUpdate, METH_VARARGS, "Update the shader on the other thread"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };
 
