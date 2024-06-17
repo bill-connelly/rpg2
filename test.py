@@ -1,7 +1,7 @@
 import rpg
 import time
 
-config = rpg.setup()
+config = rpg.setup(16)
 
 #shader = rpg.build_shader(0, 20.1, 1)
 #rpg.load_shader(config, shader)
@@ -9,9 +9,11 @@ config = rpg.setup()
 
 #time.sleep(2)
 
-shader2 = rpg.build_shader(0, 5.01, 2)
+# if (!PyArg_ParseTuple(args, "fff", &angle, &cyclesPerPixel, &cyclesPerSecond)) {
+
+shader2 = rpg.build_shader(3.141/4, 20.1, 5 )
 rpg.load_shader(config, shader2)
-rpg.thread_display(config)
+rpg.display(config, 0)
 #rpg.display(config, 25)
 
 
